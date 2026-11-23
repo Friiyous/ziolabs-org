@@ -13,7 +13,7 @@
 print("📦 [1/3] Installation des modules de haute performance...")
 !pip install -q --no-warn-conflicts faster-whisper gTTS
 
-import os, sys, time, gc, threading, subprocess, math, shutil
+import os, sys, time, gc, threading, subprocess, math, shutil, glob
 import torch
 from IPython.display import Javascript, display, HTML
 
@@ -200,26 +200,60 @@ for short_id, short_text in TEXTS_SHORTS.items():
 
 
 # ==============================================================================
-# CELLULE 4 : GÉNÉRATION DES SOUS-TITRES DYNAMIQUES OR #FFD700 (GPU T4)
+# CELLULE 4 : GÉNÉRATION DES SOUS-TITRES DYNAMIQUES OR #FFD700 (GPU / CPU / SMART)
 # ==============================================================================
-#@title 4. Transcription Faster-Whisper & Sous-Titres ASS Haute Couture
-from faster_whisper import WhisperModel
+#@title 4. Génération Robuste des Sous-Titres ASS Haute Couture Or #FFD700
 
-use_cuda = torch.cuda.is_available()
-device = "cuda" if use_cuda else "cpu"
-compute_type = "float16" if use_cuda else "int8"
-print(f"⚡ Initialisation Faster-Whisper sur périphérique : {device.upper()} ({compute_type})...")
-model = WhisperModel("small", device=device, compute_type=compute_type)
+# Fixe les chemins cuDNN si présents
+cudnn_libs = glob.glob("/usr/local/lib/python*/dist-packages/nvidia/cudnn/lib") + glob.glob("/usr/lib/x86_64-linux-gnu")
+if cudnn_libs:
+    os.environ["LD_LIBRARY_PATH"] = ":".join(cudnn_libs) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-def create_ass_subtitles(audio_file, output_ass, width=1920, height=1080, fontsize=52, margin_v=90):
-    if os.path.exists(output_ass) and os.path.getsize(output_ass) > 500:
-        print(f"⏩ Sous-titres déjà existants : {os.path.basename(output_ass)}")
+# Initialisation Faster-Whisper avec double repli sécurisé (CUDA -> CPU -> Smart Synchronizer)
+whisper_model = None
+try:
+    from faster_whisper import WhisperModel
+    if torch.cuda.is_available():
+        try:
+            print("⚡ Tentative d'initialisation Faster-Whisper sur GPU T4 (CUDA float16)...")
+            whisper_model = WhisperModel("small", device="cuda", compute_type="float16")
+            print("✅ Faster-Whisper opérationnel sur GPU T4 !")
+        except Exception as e_cuda:
+            print(f"⚠️ CUDA/cuDNN indisponible ({e_cuda}), basculement sur CPU...")
+    if whisper_model is None:
+        try:
+            print("⚡ Initialisation Faster-Whisper sur CPU (int8)...")
+            whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
+            print("✅ Faster-Whisper opérationnel sur CPU !")
+        except Exception as e_cpu:
+            print(f"⚠️ Faster-Whisper CPU indisponible ({e_cpu}), activation du Smart Synchronizer...")
+            whisper_model = None
+except Exception as e_import:
+    print(f"⚠️ Faster-Whisper non disponible ({e_import}), passage au Smart Synchronizer ZioLabs.")
+    whisper_model = None
+
+
+def format_ass_time(sec):
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = int(sec % 60)
+    cs = int(round((sec - int(sec)) * 100))
+    if cs >= 100: cs = 99
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def generate_smart_subtitles(text, audio_duration, output_ass, width=1920, height=1080, fontsize=52, margin_v=90):
+    """Générateur de sous-titres haute précision ZioLabs sans dépendance externe"""
+    words = [w.strip() for w in text.split() if w.strip()]
+    if not words:
         return
-
-    print(f"📝 Transcription mot à mot avec timestamps GPU : {os.path.basename(audio_file)}...")
-    segments, _ = model.transcribe(audio_file, language="fr", word_timestamps=True)
     
-    # Style ZioLabs : DejaVu Sans Bold, Couleur Or #FFD700 (&H0000D7FF), Bordure Pétrole Sombre (&H002F2609)
+    total_words = len(words)
+    lead_in = 0.5
+    lead_out = 0.5
+    available_duration = max(1.0, audio_duration - lead_in - lead_out)
+    sec_per_word = available_duration / total_words
+
     ass_header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -233,47 +267,96 @@ Style: Default,DejaVu Sans,{fontsize},&H0000D7FF,&H000000FF,&H002F2609,&H8000000
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    def to_ass_time(sec):
-        h = int(sec // 3600)
-        m = int((sec % 3600) // 60)
-        s = int(sec % 60)
-        cs = int(round((sec - int(sec)) * 100))
-        if cs >= 100: cs = 99
-        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-    events, buffer = [], []
-    for seg in segments:
-        for w in seg.words:
-            clean = w.word.strip()
-            buffer.append((clean, w.start, w.end))
-            if len(buffer) >= 3 or clean.endswith(('.', '?', '!', ':')):
-                st = to_ass_time(buffer[0][1])
-                en = to_ass_time(buffer[-1][2])
-                txt = " ".join([b[0] for b in buffer])
-                # Mise en valeur des entités clés en Cyan lumineux (&H00FFFF00)
-                for kw in ["ChatGPT", "Silicon Valley", "coltan", "Congo", "lithium", "Zimbabwe", "Nvidia", "IA", "Afrique", "ZioLabs", "Tesla"]:
-                    txt = txt.replace(kw, f"{{\\c&H00FFFF00\\b1}}{kw}{{\\c&H0000D7FF\\b0}}")
-                events.append(f"Dialogue: 0,{st},{en},Default,,0,0,0,,{txt}")
-                buffer = []
-    if buffer:
-        st = to_ass_time(buffer[0][1])
-        en = to_ass_time(buffer[-1][2])
-        txt = " ".join([b[0] for b in buffer])
-        events.append(f"Dialogue: 0,{st},{en},Default,,0,0,0,,{txt}")
+    events = []
+    chunk_size = 3
+    current_time = lead_in
+    for i in range(0, total_words, chunk_size):
+        chunk = words[i:i + chunk_size]
+        chunk_dur = len(chunk) * sec_per_word
+        st = current_time
+        en = min(audio_duration, current_time + chunk_dur)
+        current_time = en
+        
+        txt = " ".join(chunk)
+        for kw in ["ChatGPT", "Silicon Valley", "coltan", "Congo", "lithium", "Zimbabwe", "Nvidia", "IA", "Afrique", "ZioLabs", "Tesla"]:
+            txt = txt.replace(kw, f"{{\\c&H00FFFF00\\b1}}{kw}{{\\c&H0000D7FF\\b0}}")
+        events.append(f"Dialogue: 0,{format_ass_time(st)},{format_ass_time(en)},Default,,0,0,0,,{txt}")
 
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write(ass_header + "\n".join(events))
-    print(f"✅ Fichier de sous-titres validé : {output_ass}")
+    print(f"✅ Sous-titres Or haute précision générés : {output_ass}")
 
-# Sous-titres 16:9 Documentaire
+
+def create_ass_subtitles(audio_file, output_ass, text_fallback="", width=1920, height=1080, fontsize=52, margin_v=90):
+    if os.path.exists(output_ass) and os.path.getsize(output_ass) > 500:
+        print(f"⏩ Sous-titres déjà existants : {os.path.basename(output_ass)}")
+        return
+
+    probe_dur = f"ffprobe -i '{audio_file}' -show_entries format=duration -v quiet -of csv='p=0'"
+    try:
+        audio_dur = float(subprocess.check_output(probe_dur, shell=True).decode().strip())
+    except Exception:
+        audio_dur = 60.0
+
+    success = False
+    if whisper_model is not None:
+        try:
+            print(f"📝 Transcription mot à mot Whisper : {os.path.basename(audio_file)}...")
+            segments, _ = whisper_model.transcribe(audio_file, language="fr", word_timestamps=True)
+            
+            ass_header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {width}
+PlayResY: {height}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,DejaVu Sans,{fontsize},&H0000D7FF,&H000000FF,&H002F2609,&H80000000,-1,0,0,0,100,100,1,0,1,4,2,2,60,60,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+            events, buffer = [], []
+            for seg in segments:
+                for w in seg.words:
+                    clean = w.word.strip()
+                    buffer.append((clean, w.start, w.end))
+                    if len(buffer) >= 3 or clean.endswith(('.', '?', '!', ':')):
+                        st = format_ass_time(buffer[0][1])
+                        en = format_ass_time(buffer[-1][2])
+                        txt = " ".join([b[0] for b in buffer])
+                        for kw in ["ChatGPT", "Silicon Valley", "coltan", "Congo", "lithium", "Zimbabwe", "Nvidia", "IA", "Afrique", "ZioLabs", "Tesla"]:
+                            txt = txt.replace(kw, f"{{\\c&H00FFFF00\\b1}}{kw}{{\\c&H0000D7FF\\b0}}")
+                        events.append(f"Dialogue: 0,{st},{en},Default,,0,0,0,,{txt}")
+                        buffer = []
+            if buffer:
+                st = format_ass_time(buffer[0][1])
+                en = format_ass_time(buffer[-1][2])
+                txt = " ".join([b[0] for b in buffer])
+                events.append(f"Dialogue: 0,{st},{en},Default,,0,0,0,,{txt}")
+
+            with open(output_ass, "w", encoding="utf-8") as f:
+                f.write(ass_header + "\n".join(events))
+            print(f"✅ Sous-titres Whisper validés : {output_ass}")
+            success = True
+        except Exception as e_wh:
+            print(f"⚠️ Décodage Whisper en échec ({e_wh}), basculement immédiat sur Smart Synchronizer...")
+            success = False
+
+    if not success:
+        generate_smart_subtitles(text_fallback, audio_dur, output_ass, width=width, height=height, fontsize=fontsize, margin_v=margin_v)
+
+
+# 1. Sous-titres 16:9 Documentaire (15 min)
 doc_ass_path = os.path.join(PROD_DIR, "subtitles_doc_15m.ass")
-create_ass_subtitles(audio_doc_path, doc_ass_path, width=1920, height=1080, fontsize=48, margin_v=95)
+create_ass_subtitles(audio_doc_path, doc_ass_path, text_fallback=TEXT_DOC_15M, width=1920, height=1080, fontsize=48, margin_v=95)
 
-# Sous-titres 9:16 Shorts
+# 2. Sous-titres 9:16 Shorts
 shorts_ass = {}
 for short_id, a_path in audios_shorts.items():
     s_ass = os.path.join(PROD_DIR, f"{short_id}_subtitles.ass")
-    create_ass_subtitles(a_path, s_ass, width=1080, height=1920, fontsize=62, margin_v=420)
+    create_ass_subtitles(a_path, s_ass, text_fallback=TEXTS_SHORTS[short_id], width=1080, height=1920, fontsize=62, margin_v=420)
     shorts_ass[short_id] = s_ass
 
 

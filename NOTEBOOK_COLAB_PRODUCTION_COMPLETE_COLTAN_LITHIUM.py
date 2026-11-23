@@ -7,21 +7,21 @@
 # ==============================================================================
 
 # ==============================================================================
-# CELLULE 1 : INSTALLATION DES DÉPENDANCES & MONTAGE GOOGLE DRIVE
+# CELLULE 1 : GARDIEN ANTI-VEILLE, INSTALLATION & MONTAGE DRIVE
 # ==============================================================================
-#@title 1. Initialisation de l'Environnement et Montage Google Drive
-print("📦 Installation des dépendances haute performance...")
+#@title 1. Initialisation, Gardien Anti-Veille & Montage Drive
+print("📦 [1/3] Installation des modules de haute performance...")
 !pip install -q --no-warn-conflicts faster-whisper gTTS
 
 import os, sys, time, gc, threading, subprocess, math, shutil
 import torch
-from IPython.display import Javascript, display
+from IPython.display import Javascript, display, HTML
 
 # 1. Montage sécurisé de Google Drive (anti-crash si déjà monté)
+print("📂 [2/3] Connexion sécurisée à Google Drive...")
 if os.path.exists('/content/drive/MyDrive'):
-    print("✅ Google Drive est déjà monté et prêt.")
+    print("✅ Google Drive est déjà connecté.")
 else:
-    print("📂 Connexion à votre Google Drive...")
     from google.colab import drive
     try:
         drive.mount('/content/drive', force_remount=False)
@@ -39,20 +39,28 @@ EXPORTS_DIR = os.path.join(DRIVE_BASE, "00_EXPORTS_FINAUX")
 for d in [PROD_DIR, AUDIO_DIR, CLIPS_16x9_DIR, CLIPS_9x16_DIR, EXPORTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
-# 2. Thread Heartbeat Anti-Veille & Anti-Déconnexion
-def colab_heartbeat():
+# 2. Sentinelle Python Heartbeat Anti-Veille Serveur
+START_TIME = time.time()
+def colab_sentinel_watchdog():
     hb_file = os.path.join(EXPORTS_DIR, ".colab_heartbeat.txt")
+    counter = 0
     while True:
         try:
+            now = time.time()
+            elapsed_m = int((now - START_TIME) // 60)
+            elapsed_s = int((now - START_TIME) % 60)
             with open(hb_file, "w") as f:
-                f.write(f"ZioLabs Industrial Engine Active: {time.time()}\n")
+                f.write(f"ZioLabs Sentinel Active | Elapsed: {elapsed_m:02d}m{elapsed_s:02d}s | TS: {now}\n")
+            if counter % 10 == 0 and counter > 0:
+                print(f"🛡️ [SENTINEL ACTIF] Maintien en vie Colab & Drive (En cours depuis {elapsed_m}m {elapsed_s}s)")
+            counter += 1
         except Exception:
             pass
-        time.sleep(30)
+        time.sleep(25)
 
-hb_thread = threading.Thread(target=colab_heartbeat, daemon=True)
-hb_thread.start()
-print("🛡️ Verrou anti-déconnexion & Thread Heartbeat activés sur Google Drive.")
+sentinel_thread = threading.Thread(target=colab_sentinel_watchdog, daemon=True)
+sentinel_thread.start()
+print("🛡️ [3/3] Sentinelle d'arrière-plan activée (le serveur ne s'endormira jamais).")
 
 # 3. Patch PyAV pour compatibilité Faster-Whisper
 import av
@@ -61,18 +69,18 @@ def _safe_av_open(*args, **kwargs):
     kwargs.pop("metadata_errors", None)
     return _orig_open(*args, **kwargs)
 av.open = _safe_av_open
-print("✅ Environnement GPU & Drive 100% prêt.")
 
 # 4. Injection automatique du Keep-Alive Navigateur
 display(Javascript('''
 function KeepColabAlive() {
-    console.log("🛡️ [ZioLabs Keep-Alive] Ping automatique Colab");
+    console.log("🛡️ [ZioLabs Keep-Alive] Ping automatique navigateur : " + new Date().toLocaleTimeString());
     let btn = document.querySelector("colab-connect-button") || document.querySelector("#connect");
     if (btn) { btn.click(); }
 }
-setInterval(KeepColabAlive, 60000);
+setInterval(KeepColabAlive, 30000);
 '''))
-print("⚡ Injection JavaScript Keep-Alive effectuée dans le navigateur.")
+print("⚡ Injection Keep-Alive navigateur effectuée avec succès !")
+print("🚀 Prêt pour la production complète !")
 
 
 # ==============================================================================
@@ -200,7 +208,7 @@ from faster_whisper import WhisperModel
 use_cuda = torch.cuda.is_available()
 device = "cuda" if use_cuda else "cpu"
 compute_type = "float16" if use_cuda else "int8"
-print(f"⚡ Initialisation Faster-Whisper sur GPU / CPU : {device.upper()} ({compute_type})...")
+print(f"⚡ Initialisation Faster-Whisper sur périphérique : {device.upper()} ({compute_type})...")
 model = WhisperModel("small", device=device, compute_type=compute_type)
 
 def create_ass_subtitles(audio_file, output_ass, width=1920, height=1080, fontsize=52, margin_v=90):

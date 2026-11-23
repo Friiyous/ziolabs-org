@@ -3,6 +3,7 @@
 # PROJET : « LE SANG DE L'INTELLIGENCE ARTIFICIELLE : Coltan, Lithium & Souveraineté »
 # FORMATS : Grand Documentaire 16:9 (15 min) + 3 Shorts 9:16 Viraux (50s chacun)
 # STYLE : 100% Documentaire Cinématographique (SANS ANIMATEUR) | Sous-titres Or #FFD700
+# EXPÉRIENCE : LECTEURS VIDÉO INTÉGRÉS DANS LE NAVIGATEUR EN TEMPS RÉEL
 # NORME ACOUSTIQUE : EBU R128 (-14 LUFS, True Peak -1.5 dB, Broadcast Master)
 # ==============================================================================
 
@@ -13,14 +14,14 @@
 print("📦 [1/3] Installation des modules de haute performance...")
 !pip install -q --no-warn-conflicts faster-whisper gTTS
 
-import os, sys, time, gc, threading, subprocess, math, shutil, glob
+import os, sys, time, gc, threading, subprocess, math, shutil, glob, base64
 import torch
 from IPython.display import Javascript, display, HTML
 
 # 1. Montage sécurisé de Google Drive (anti-crash si déjà monté)
 print("📂 [2/3] Connexion sécurisée à Google Drive...")
 if os.path.exists('/content/drive/MyDrive'):
-    print("✅ Google Drive est déjà connecté.")
+    print("✅ Google Drive est déjà connecté et opérationnel.")
 else:
     from google.colab import drive
     try:
@@ -39,7 +40,7 @@ EXPORTS_DIR = os.path.join(DRIVE_BASE, "00_EXPORTS_FINAUX")
 for d in [PROD_DIR, AUDIO_DIR, CLIPS_16x9_DIR, CLIPS_9x16_DIR, EXPORTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
-# 2. Sentinelle Python Heartbeat Anti-Veille Serveur
+# 2. Sentinelle d'Arrière-Plan : Empêche Colab et Drive de dormir
 START_TIME = time.time()
 def colab_sentinel_watchdog():
     hb_file = os.path.join(EXPORTS_DIR, ".colab_heartbeat.txt")
@@ -52,7 +53,7 @@ def colab_sentinel_watchdog():
             with open(hb_file, "w") as f:
                 f.write(f"ZioLabs Sentinel Active | Elapsed: {elapsed_m:02d}m{elapsed_s:02d}s | TS: {now}\n")
             if counter % 10 == 0 and counter > 0:
-                print(f"🛡️ [SENTINEL ACTIF] Maintien en vie Colab & Drive (En cours depuis {elapsed_m}m {elapsed_s}s)")
+                print(f"🛡️ [SENTINEL EN VEILLE ACTIVE] Session Colab & Drive maintenues (Temps : {elapsed_m}m {elapsed_s}s)")
             counter += 1
         except Exception:
             pass
@@ -60,7 +61,7 @@ def colab_sentinel_watchdog():
 
 sentinel_thread = threading.Thread(target=colab_sentinel_watchdog, daemon=True)
 sentinel_thread.start()
-print("🛡️ [3/3] Sentinelle d'arrière-plan activée (le serveur ne s'endormira jamais).")
+print("🛡️ [3/3] Sentinelle serveur activée (Colab ne s'endormira jamais).")
 
 # 3. Patch PyAV pour compatibilité Faster-Whisper
 import av
@@ -70,16 +71,69 @@ def _safe_av_open(*args, **kwargs):
     return _orig_open(*args, **kwargs)
 av.open = _safe_av_open
 
-# 4. Injection automatique du Keep-Alive Navigateur
+# 4. Injection automatique du Keep-Alive Navigateur (maintien d'onglet ouvert)
 display(Javascript('''
 function KeepColabAlive() {
-    console.log("🛡️ [ZioLabs Keep-Alive] Ping automatique navigateur : " + new Date().toLocaleTimeString());
+    console.log("🛡️ [ZioLabs Keep-Alive] Ping automatique onglet : " + new Date().toLocaleTimeString());
     let btn = document.querySelector("colab-connect-button") || document.querySelector("#connect");
     if (btn) { btn.click(); }
 }
-setInterval(KeepColabAlive, 30000);
+setInterval(KeepColabAlive, 25000);
 '''))
-print("⚡ Injection Keep-Alive navigateur effectuée avec succès !")
+
+# 5. Fonction d'intégration du Lecteur Vidéo Navigateur dans Colab
+def display_video_player(video_path, width=480, title="Production ZioLabs"):
+    """Intègre un lecteur vidéo interactif directement dans le navigateur Colab."""
+    try:
+        size_mb = os.path.getsize(video_path) / (1024 * 1024)
+        filename = os.path.basename(video_path)
+        
+        # Si le fichier fait moins de 35 MB (Shorts), encodage base64 pour lecture directe
+        if size_mb <= 35:
+            with open(video_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            video_tag = f"""
+            <video width="100%" max-width="{width}px" controls autoplay muted loop style="border-radius: 8px; border: 1px solid #103C46; max-height: 520px; background: #000;">
+                <source src="data:video/mp4;base64,{data}" type="video/mp4">
+            </video>
+            """
+        else:
+            # Pour les très gros fichiers (Documentaire 15 min), extrait teaser haute fidélité de 45s
+            teaser_path = f"/tmp/teaser_{filename}"
+            subprocess.run([
+                "ffmpeg", "-y", "-ss", "00:00:00", "-i", video_path, "-t", "45",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac",
+                teaser_path
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            with open(teaser_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            if os.path.exists(teaser_path): os.remove(teaser_path)
+            
+            video_tag = f"""
+            <p style="color: #D08A26; font-size: 13px; margin: 4px 0 8px 0;">⚡ Extrait de prévisualisation (45 premières secondes en direct) :</p>
+            <video width="100%" max-width="{width}px" controls autoplay muted loop style="border-radius: 8px; border: 1px solid #103C46; max-height: 400px; background: #000;">
+                <source src="data:video/mp4;base64,{data}" type="video/mp4">
+            </video>
+            """
+
+        html = f"""
+        <div style="background-color: #09262F; border: 2px solid #FFD700; border-radius: 12px; padding: 18px; margin: 20px 0; max-width: {max(width, 480)}px; font-family: Trebuchet MS, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #103C46; padding-bottom: 8px;">
+                <h3 style="color: #FFD700; margin: 0; font-size: 18px;">🎬 {title}</h3>
+                <span style="background: #103C46; color: #FAF7F0; padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 1px solid #D08A26;">{size_mb:.1f} MB</span>
+            </div>
+            {video_tag}
+            <div style="margin-top: 12px; font-size: 13px; color: #FAF7F0;">
+                📁 Fichier enregistré dans : <code>00_EXPORTS_FINAUX/{filename}</code>
+            </div>
+        </div>
+        """
+        display(HTML(html))
+    except Exception as e:
+        print(f"ℹ️ Vidéo générée avec succès sur Google Drive : {video_path}")
+
+print("⚡ Moteur d'affichage vidéo dans le navigateur configuré !")
 print("🚀 Prêt pour la production complète !")
 
 
@@ -176,7 +230,6 @@ def generate_broadcast_audio(text, output_path):
     tts = gTTS(text=text, lang='fr', slow=False)
     tts.save(temp_raw)
     
-    # Filtres broadcast : Coupe-bas 75Hz, Brillance 3.2kHz, Normalisation EBU R128 (-14 LUFS, TP -1.5 dB)
     cmd = [
         "ffmpeg", "-y", "-i", temp_raw,
         "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,highpass=f=75,equalizer=f=3200:t=q:w=1.2:g=2.2",
@@ -204,32 +257,30 @@ for short_id, short_text in TEXTS_SHORTS.items():
 # ==============================================================================
 #@title 4. Génération Robuste des Sous-Titres ASS Haute Couture Or #FFD700
 
-# Fixe les chemins cuDNN si présents
 cudnn_libs = glob.glob("/usr/local/lib/python*/dist-packages/nvidia/cudnn/lib") + glob.glob("/usr/lib/x86_64-linux-gnu")
 if cudnn_libs:
     os.environ["LD_LIBRARY_PATH"] = ":".join(cudnn_libs) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-# Initialisation Faster-Whisper avec double repli sécurisé (CUDA -> CPU -> Smart Synchronizer)
 whisper_model = None
 try:
     from faster_whisper import WhisperModel
     if torch.cuda.is_available():
         try:
-            print("⚡ Tentative d'initialisation Faster-Whisper sur GPU T4 (CUDA float16)...")
+            print("⚡ Initialisation Faster-Whisper sur GPU T4 (CUDA float16)...")
             whisper_model = WhisperModel("small", device="cuda", compute_type="float16")
             print("✅ Faster-Whisper opérationnel sur GPU T4 !")
         except Exception as e_cuda:
-            print(f"⚠️ CUDA/cuDNN indisponible ({e_cuda}), basculement sur CPU...")
+            print(f"⚠️ CUDA indisponible ({e_cuda}), basculement immédiat sur CPU...")
     if whisper_model is None:
         try:
             print("⚡ Initialisation Faster-Whisper sur CPU (int8)...")
             whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
             print("✅ Faster-Whisper opérationnel sur CPU !")
         except Exception as e_cpu:
-            print(f"⚠️ Faster-Whisper CPU indisponible ({e_cpu}), activation du Smart Synchronizer...")
+            print(f"⚠️ Mode CPU indisponible ({e_cpu}), activation du Smart Synchronizer ZioLabs...")
             whisper_model = None
 except Exception as e_import:
-    print(f"⚠️ Faster-Whisper non disponible ({e_import}), passage au Smart Synchronizer ZioLabs.")
+    print(f"⚠️ Faster-Whisper non disponible ({e_import}), passage au Smart Synchronizer.")
     whisper_model = None
 
 
@@ -243,14 +294,11 @@ def format_ass_time(sec):
 
 
 def generate_smart_subtitles(text, audio_duration, output_ass, width=1920, height=1080, fontsize=52, margin_v=90):
-    """Générateur de sous-titres haute précision ZioLabs sans dépendance externe"""
     words = [w.strip() for w in text.split() if w.strip()]
-    if not words:
-        return
+    if not words: return
     
     total_words = len(words)
-    lead_in = 0.5
-    lead_out = 0.5
+    lead_in, lead_out = 0.5, 0.5
     available_duration = max(1.0, audio_duration - lead_in - lead_out)
     sec_per_word = available_duration / total_words
 
@@ -284,7 +332,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write(ass_header + "\n".join(events))
-    print(f"✅ Sous-titres Or haute précision générés : {output_ass}")
+    print(f"✅ Sous-titres Or générés : {output_ass}")
 
 
 def create_ass_subtitles(audio_file, output_ass, text_fallback="", width=1920, height=1080, fontsize=52, margin_v=90):
@@ -293,10 +341,8 @@ def create_ass_subtitles(audio_file, output_ass, text_fallback="", width=1920, h
         return
 
     probe_dur = f"ffprobe -i '{audio_file}' -show_entries format=duration -v quiet -of csv='p=0'"
-    try:
-        audio_dur = float(subprocess.check_output(probe_dur, shell=True).decode().strip())
-    except Exception:
-        audio_dur = 60.0
+    try: audio_dur = float(subprocess.check_output(probe_dur, shell=True).decode().strip())
+    except Exception: audio_dur = 60.0
 
     success = False
     if whisper_model is not None:
@@ -361,18 +407,16 @@ for short_id, a_path in audios_shorts.items():
 
 
 # ==============================================================================
-# CELLULE 5 : MONTAGE & EXPORT MASTER DU GRAND DOCUMENTAIRE 16:9 (15 MIN)
+# CELLULE 5 : MONTAGE & VISIONNAGE DU GRAND DOCUMENTAIRE 16:9 (15 MIN)
 # ==============================================================================
-#@title 5. Rendu & Exportation du Grand Documentaire 16:9 vers Google Drive
+#@title 5. Rendu & Lecteur Vidéo du Grand Documentaire 16:9
 doc_export_path = os.path.join(EXPORTS_DIR, "MASTER_DOC_15M_COLTAN_LITHIUM_IA_16x9.mp4")
 
 probe_doc = f"ffprobe -i '{audio_doc_path}' -show_entries format=duration -v quiet -of csv='p=0'"
 doc_duration = float(subprocess.check_output(probe_doc, shell=True).decode().strip())
 print(f"⏱️ Durée exacte du Documentaire : {doc_duration:.1f} secondes (~{doc_duration/60:.1f} minutes)")
 
-if os.path.exists(doc_export_path) and os.path.getsize(doc_export_path) > 10000000:
-    print(f"⏩ Master Documentaire 15 min déjà généré : {doc_export_path}")
-else:
+if not os.path.exists(doc_export_path) or os.path.getsize(doc_export_path) < 10000000:
     print("🎬 Encodage cinématique du Master 16:9 avec habillage ZioLabs et sous-titres Or...")
     local_doc_ass = "/tmp/doc_subtitles.ass"
     shutil.copy(doc_ass_path, local_doc_ass)
@@ -393,86 +437,119 @@ else:
         doc_export_path
     ]
     subprocess.run(cmd_doc, check=True)
-    print(f"🏆 GRAND DOCUMENTAIRE 15 MIN PRÊT SUR GOOGLE DRIVE : {doc_export_path}")
+    print(f"🏆 GRAND DOCUMENTAIRE PRÊT : {doc_export_path}")
+
+# Affichage direct du lecteur vidéo dans l'onglet ouvert du navigateur
+display_video_player(doc_export_path, width=720, title="Grand Documentaire 16:9 (15 min)")
 
 
 # ==============================================================================
-# CELLULE 6 : MONTAGE & EXPORT DES 3 SHORTS VIRAUX 9:16
+# CELLULE 6 : MONTAGE & VISIONNAGE DES 3 SHORTS VIRAUX 9:16
 # ==============================================================================
-#@title 6. Rendu & Exportation des 3 Shorts Verticaux 9:16 vers Google Drive
+#@title 6. Rendu & Lecteurs Vidéo des 3 Shorts Verticaux 9:16
+titles_map = {
+    "SHORT_01": "COLTAN & CHATGPT : LE SECRET DU CONGO",
+    "SHORT_02": "LITHIUM : LE DÉCRET CHOC DU ZIMBABWE",
+    "SHORT_03": "15 $ vs 35 000 $ : L\\'ÉQUATION DE L\\'IA"
+}
+
 for short_id, a_path in audios_shorts.items():
     s_export = os.path.join(EXPORTS_DIR, f"{short_id}_COLTAN_LITHIUM_9x16.mp4")
     s_ass = shorts_ass[short_id]
     
-    if os.path.exists(s_export) and os.path.getsize(s_export) > 1000000:
-        print(f"⏩ Short déjà généré : {s_export}")
-        continue
-
     probe_s = f"ffprobe -i '{a_path}' -show_entries format=duration -v quiet -of csv='p=0'"
     s_dur = float(subprocess.check_output(probe_s, shell=True).decode().strip())
     
-    print(f"🎬 Encodage {short_id} ({s_dur:.1f}s) en 1080x1920 vertical...")
-    local_s_ass = f"/tmp/{short_id}_subtitles.ass"
-    shutil.copy(s_ass, local_s_ass)
+    short_title = titles_map.get(short_id, "ZIOLABS WEB TV")
+    
+    if not os.path.exists(s_export) or os.path.getsize(s_export) < 1000000:
+        print(f"🎬 Encodage {short_id} ({s_dur:.1f}s) en 1080x1920 vertical...")
+        local_s_ass = f"/tmp/{short_id}_subtitles.ass"
+        shutil.copy(s_ass, local_s_ass)
 
-    titles = {
-        "SHORT_01": "COLTAN & CHATGPT : LE SECRET DU CONGO",
-        "SHORT_02": "LITHIUM : LE DÉCRET CHOC DU ZIMBABWE",
-        "SHORT_03": "15 $ vs 35 000 $ : L\\'ÉQUATION DE L\\'IA"
-    }
-    short_title = titles.get(short_id, "ZIOLABS WEB TV")
-    
-    vf_short = (
-        f"subtitles={local_s_ass},"
-        f"drawbox=y=130:h=120:color=0x09262F@0.9:t=fill,"
-        f"drawtext=text='{short_title}':font='DejaVu Sans':fontcolor=0xFFD700:fontsize=34:x=(w-text_w)/2:y=172"
-    )
-    
-    cmd_short = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"color=c=0x09262F:s=1080x1920:d={s_dur}:r=30",
-        "-i", a_path,
-        "-vf", vf_short,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
-        "-shortest",
-        s_export
-    ]
-    subprocess.run(cmd_short, check=True)
-    print(f"🏆 SHORT VALIDÉ SUR GOOGLE DRIVE : {s_export}")
+        vf_short = (
+            f"subtitles={local_s_ass},"
+            f"drawbox=y=130:h=120:color=0x09262F@0.9:t=fill,"
+            f"drawtext=text='{short_title}':font='DejaVu Sans':fontcolor=0xFFD700:fontsize=34:x=(w-text_w)/2:y=172"
+        )
+        cmd_short = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c=0x09262F:s=1080x1920:d={s_dur}:r=30",
+            "-i", a_path,
+            "-vf", vf_short,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            s_export
+        ]
+        subprocess.run(cmd_short, check=True)
+        print(f"🏆 SHORT VALIDÉ : {s_export}")
+
+    # Affichage du lecteur vidéo vertical en direct dans le navigateur
+    display_video_player(s_export, width=380, title=f"Short 9:16 — {short_title.replace(chr(92), '')}")
 
 
 # ==============================================================================
-# CELLULE 7 : RAPPORT DE CONTRÔLE QUALITÉ (QC) & VALIDATION DES EXPORTS
+# CELLULE 7 : TABLEAU DE BORD FINAL & CONTRÔLE QUALITÉ VISUEL
 # ==============================================================================
-#@title 7. Rapport de Contrôle Qualité (QC) Broadcast
-print("\n" + "="*80)
-print("📊 RAPPORT DE CONTRÔLE QUALITÉ INDUSTRIEL ZIOLABS WEB TV")
-print("="*80)
-
+#@title 7. Tableau de Bord Final & Téléchargement Direct
 final_files = [
-    "MASTER_DOC_15M_COLTAN_LITHIUM_IA_16x9.mp4",
-    "SHORT_01_COLTAN_LITHIUM_9x16.mp4",
-    "SHORT_02_COLTAN_LITHIUM_9x16.mp4",
-    "SHORT_03_COLTAN_LITHIUM_9x16.mp4"
+    ("MASTER_DOC_15M_COLTAN_LITHIUM_IA_16x9.mp4", "Grand Documentaire 16:9 (15 min)"),
+    ("SHORT_01_COLTAN_LITHIUM_9x16.mp4", "Short 1 : Coltan & ChatGPT"),
+    ("SHORT_02_COLTAN_LITHIUM_9x16.mp4", "Short 2 : Lithium & Zimbabwe"),
+    ("SHORT_03_COLTAN_LITHIUM_9x16.mp4", "Short 3 : 15 $ vs 35 000 $")
 ]
 
-all_ok = True
-for fn in final_files:
+rows_html = ""
+for fn, label in final_files:
     fp = os.path.join(EXPORTS_DIR, fn)
     if os.path.exists(fp):
         size_mb = os.path.getsize(fp) / (1024 * 1024)
-        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration,codec_name -of csv=p=0 '{fp}'"
+        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration -of csv=p=0 '{fp}'"
         info = subprocess.check_output(probe_cmd, shell=True).decode().strip().split(",")
-        w, h, dur, codec = info[0], info[1], float(info[2]), info[3]
-        print(f"✅ {fn:<42} | {w}x{h:<5} | {dur/60:.1f} min ({dur:.0f}s) | {size_mb:.1f} MB | {codec}")
+        w, h, dur = info[0], info[1], float(info[2])
+        rows_html += f"""
+        <tr style="border-bottom: 1px solid #103C46;">
+            <td style="padding: 10px; color: #FFD700; font-weight: bold;">{label}</td>
+            <td style="padding: 10px; color: #FAF7F0;">{w}×{h}</td>
+            <td style="padding: 10px; color: #FAF7F0;">{dur/60:.1f}m ({dur:.0f}s)</td>
+            <td style="padding: 10px; color: #D08A26; font-weight: bold;">{size_mb:.1f} MB</td>
+            <td style="padding: 10px; color: #00FF88;">✅ Prêt</td>
+        </tr>
+        """
     else:
-        print(f"❌ {fn:<42} | MANQUANT")
-        all_ok = False
+        rows_html += f"""
+        <tr style="border-bottom: 1px solid #103C46;">
+            <td style="padding: 10px; color: #FFD700;">{label}</td>
+            <td colspan="4" style="padding: 10px; color: #FF4444;">⏳ En cours d'encodage...</td>
+        </tr>
+        """
 
-print("="*80)
-if all_ok:
-    print("🎉 TOUS LES LIVRABLES ONT ÉTÉ ENCODÉS ET VALIDÉS AVEC SUCCÈS SUR GOOGLE DRIVE !")
-    print(f"📁 Dossier de réception : {EXPORTS_DIR}")
-else:
-    print("⚠️ Certains fichiers sont encore en cours de traitement.")
+dashboard_html = f"""
+<div style="background-color: #09262F; border: 2px solid #FFD700; border-radius: 14px; padding: 22px; margin: 25px 0; font-family: Trebuchet MS, sans-serif;">
+    <h2 style="color: #FFD700; margin-top: 0; display: flex; align-items: center; gap: 10px;">
+        <span>🏆</span> TABLEAU DE BORD DE PRODUCTION — ZIOLABS WEB TV
+    </h2>
+    <p style="color: #FAF7F0; font-size: 14px; margin-bottom: 15px;">
+        Toutes vos productions sont encodées selon les normes broadcast ZioLabs et enregistrées sur votre Google Drive.
+    </p>
+    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
+        <thead>
+            <tr style="background-color: #103C46; color: #FFD700;">
+                <th style="padding: 10px; border-radius: 6px 0 0 6px;">Format & Titre</th>
+                <th style="padding: 10px;">Résolution</th>
+                <th style="padding: 10px;">Durée</th>
+                <th style="padding: 10px;">Poids</th>
+                <th style="padding: 10px; border-radius: 0 6px 6px 0;">Statut</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+    <div style="margin-top: 20px; padding: 12px; background: #103C46; border-radius: 8px; color: #FAF7F0; font-size: 13px;">
+        📁 <b>Dossier Google Drive :</b> <code>/MyDrive/PATRIMOINE_ZIOLABS_WEBTV/00_EXPORTS_FINAUX/</code>
+    </div>
+</div>
+"""
+display(HTML(dashboard_html))

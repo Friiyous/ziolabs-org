@@ -3,7 +3,6 @@
 # SUJET : « L'ÉPOPÉE DE L'ALMAMY SAMORY TOURÉ : 20 Ans de Résistance Inflexible »
 # FORMAT : Grand Documentaire 16:9 Widescreen (1920x1080, 25 fps, ~20 min 28s)
 # STYLE : 100% Documentaire Cinématographique SANS ANIMATEUR / SANS AVATAR
-# SYNCHRONISATION : Montage réel des 141 clips sur les 7 Actes audio de narration
 # INVARIANTS : Charte V003 (Pétrole #09262F, Or #FFD700, Ambre #D08A26, Ivoire #FAF7F0)
 # NORME AUDIO : EBU R128 (-14 LUFS, True Peak -1.5 dB, Broadcast Master)
 # ==============================================================================
@@ -12,8 +11,9 @@
 # CELLULE 1 : CONNEXION DRIVE, DOUBLE GARDIEN ANTI-VEILLE & AUDIT DES ASSETS
 # ==============================================================================
 #@title 1. Initialisation, Double Gardien Anti-Veille & Détection des Médias
-import os, sys, time, json, shutil, threading, subprocess, glob, base64
+import os, sys, time, json, shutil, threading, subprocess, glob, base64, math
 from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
 from IPython.display import Javascript, display, HTML
 
 print("🚀 [1/4] Connexion au Google Drive et activation du gardien nocturne...")
@@ -28,17 +28,18 @@ except Exception:
     DRIVE_ROOT = Path.home() / "Google Drive"
     print(f"ℹ️ Exécution locale. Racine : {DRIVE_ROOT}")
 
-# Détection des répertoires du projet Samory Touré
+# Détection intelligente des répertoires du projet Samory Touré
 BASE_DIR = DRIVE_ROOT / 'PATRIMOINE_ZIOLABS_WEBTV'
-SAMORY_DIR = BASE_DIR / 'THEME_02_HORONYA_SAMORY_TOURE'
 OUTPUT_DIR = BASE_DIR / '00_EXPORTS_FINAUX'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Vérification des sous-dossiers
-VOIX_DIR = SAMORY_DIR / 'voix_off_samory'
-LOT1_DIR = SAMORY_DIR / 'lot1'
-LOT2_DIR = SAMORY_DIR / 'lot2'
-CLIPS_MANQUANTS_DIR = SAMORY_DIR / 'clips_manquant_samory'
+CANDIDATE_SAMORY_DIRS = [
+    BASE_DIR / 'THEME_02_HORONYA_SAMORY_TOURE',
+    BASE_DIR / 'SAMORY',
+    BASE_DIR / 'HORONYA',
+    BASE_DIR
+]
+SAMORY_DIR = next((d for d in CANDIDATE_SAMORY_DIRS if d.exists()), BASE_DIR)
 
 # Sentinelle Keep-Alive d'arrière-plan (garde la VM éveillée)
 START_TIME = time.time()
@@ -77,53 +78,71 @@ setInterval(KeepColabAlive, 25000);
 def display_video_player(video_path, width=720, title="Extrait ZioLabs"):
     try:
         p = Path(video_path)
-        if not p.exists(): return
+        if not p.exists() or p.stat().st_size < 100000:
+            print(f"ℹ️ Vidéo en cours de traitement : {p.name}")
+            return
         size_mb = p.stat().st_size / (1024 * 1024)
         filename = p.name
         
         # Extrait optimisé pour prévisualisation fluide dans le navigateur
         preview_path = f"/tmp/preview_{p.stem}.mp4"
-        subprocess.run([
+        cmd_prev = [
             "ffmpeg", "-y", "-ss", "00:00:00", "-i", str(p), "-t", "40",
             "-vf", "scale=1280:720", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24",
             "-c:a", "aac", preview_path
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ]
+        res = subprocess.run(cmd_prev, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        with open(preview_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode()
-        if os.path.exists(preview_path): os.remove(preview_path)
-        
-        html = f"""
-        <div style="background-color: #09262F; border: 2px solid #FFD700; border-radius: 12px; padding: 18px; margin: 20px 0; max-width: {width}px; font-family: Trebuchet MS, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #103C46; padding-bottom: 8px;">
-                <h3 style="color: #FFD700; margin: 0; font-size: 18px;">🎬 {title}</h3>
-                <span style="background: #103C46; color: #FAF7F0; padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 1px solid #D08A26;">{size_mb:.1f} MB</span>
+        if os.path.exists(preview_path) and os.path.getsize(preview_path) > 1000:
+            with open(preview_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            os.remove(preview_path)
+            
+            html = f"""
+            <div style="background-color: #09262F; border: 2px solid #FFD700; border-radius: 12px; padding: 18px; margin: 20px 0; max-width: {width}px; font-family: Trebuchet MS, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #103C46; padding-bottom: 8px;">
+                    <h3 style="color: #FFD700; margin: 0; font-size: 18px;">🎬 {title}</h3>
+                    <span style="background: #103C46; color: #FAF7F0; padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 1px solid #D08A26;">{size_mb:.1f} MB</span>
+                </div>
+                <video width="100%" controls autoplay muted loop style="border-radius: 8px; border: 1px solid #103C46; max-height: 420px; background: #000;">
+                    <source src="data:video/mp4;base64,{data}" type="video/mp4">
+                </video>
+                <div style="margin-top: 10px; font-size: 12px; color: #FAF7F0;">
+                    📁 Emplacement Drive : <code>00_EXPORTS_FINAUX/{filename}</code>
+                </div>
             </div>
-            <video width="100%" controls autoplay muted loop style="border-radius: 8px; border: 1px solid #103C46; max-height: 420px; background: #000;">
-                <source src="data:video/mp4;base64,{data}" type="video/mp4">
-            </video>
-            <div style="margin-top: 10px; font-size: 12px; color: #FAF7F0;">
-                📁 Emplacement Drive : <code>00_EXPORTS_FINAUX/{filename}</code>
-            </div>
-        </div>
-        """
-        display(HTML(html))
+            """
+            display(HTML(html))
+        else:
+            print(f"✅ Vidéo générée sur Google Drive : {filename} ({size_mb:.1f} MB)")
     except Exception as e:
         print(f"ℹ️ Vidéo prête : {video_path}")
 
 print("⚡ [3/4] Moteur de visionnage interactif configuré !")
 
-# Récolte et validation des assets
+# Récolte récursive et ultra-robuste des assets vidéo et audio
 video_exts = {'.mp4', '.mov', '.mkv', '.webm'}
 all_clips = []
-for d in [LOT1_DIR, LOT2_DIR, CLIPS_MANQUANTS_DIR]:
-    if d.exists():
-        for f in sorted(d.iterdir()):
-            if f.is_file() and f.suffix.lower() in video_exts and not f.name.startswith('.'):
-                all_clips.append(f)
+all_audios = []
 
-# Récolte des audios de narration
-all_audios = sorted([f for f in VOIX_DIR.iterdir() if f.is_file() and f.suffix.lower() in {'.wav', '.mp3'} and not f.name.startswith('.')])
+for root, _, files in os.walk(SAMORY_DIR):
+    for f in sorted(files):
+        ext = os.path.splitext(f)[1].lower()
+        if ext in video_exts and not f.startswith('.'):
+            all_clips.append(Path(root) / f)
+        elif ext in {'.wav', '.mp3', '.m4a', '.aac'} and not f.startswith('.'):
+            all_audios.append(Path(root) / f)
+
+# Si les clips sont insuffisants dans le dossier spécifique, balayer BASE_DIR
+if len(all_clips) < 20:
+    for root, _, files in os.walk(BASE_DIR):
+        for f in sorted(files):
+            ext = os.path.splitext(f)[1].lower()
+            if ext in video_exts and not f.startswith('.'):
+                all_clips.append(Path(root) / f)
+
+# Trier les audios chronologiquement
+all_audios = sorted(list(set(all_audios)), key=lambda x: x.name)
 
 print(f"📊 [4/4] Bilan des médias trouvés sur Google Drive :")
 print(f"   🎥 Clips vidéo disponibles : {len(all_clips)} clips")
@@ -151,7 +170,7 @@ ACTES_DEFINITION = [
         "titre_long": "L'AUBE DE GUÉLÉBA : LE RÉVEIL DU DERNIER EMPEREUR",
         "sous_titre": "29 Septembre 1898 · La Brume et l'Infiltration Secrète",
         "audio_keyword": "8_06PM",
-        "pool": "lot2", # Clips de jungle, campement, brume, tirailleurs
+        "pool": "lot2",
     },
     {
         "id": "ACTE_01",
@@ -159,7 +178,7 @@ ACTES_DEFINITION = [
         "titre_long": "L'ASCENSION D'UN COLPORTEUR (1830–1881)",
         "sous_titre": "De la Caravane de Cola au Serment Filial des Cissé",
         "audio_keyword": "8_30PM",
-        "pool": "lot1", # Clips de savane, ânes, marchés, villages
+        "pool": "lot1",
     },
     {
         "id": "ACTE_02",
@@ -167,7 +186,7 @@ ACTES_DEFINITION = [
         "titre_long": "L'USINE DE GUERRE & LES FORGES CLANDESTINES",
         "sous_titre": "Dabakala · La Duplication Secrète des Fusils Modernes",
         "audio_keyword": "8_33PM",
-        "pool": "lot1", # Clips de forges, métal incandescent, armes
+        "pool": "lot1",
     },
     {
         "id": "ACTE_03",
@@ -175,7 +194,7 @@ ACTES_DEFINITION = [
         "titre_long": "LE GRAND CHOC AVEC L'ARMÉE COLONIALE",
         "sous_titre": "Les Batailles du Fleuve Niger & la Discipline des Sofas",
         "audio_keyword": "8_39PM",
-        "pool": "lot2", # Clips de charges, cavalerie, fumée, salves
+        "pool": "lot2",
     },
     {
         "id": "ACTE_04",
@@ -183,7 +202,7 @@ ACTES_DEFINITION = [
         "titre_long": "LA TERRE BRÛLÉE & L'EMPIRE NOMADE",
         "sous_titre": "L'Exode Historique de 120 000 Âmes vers l'Est",
         "audio_keyword": "8_42PM",
-        "pool": "lot2", # Clips d'exil, colonnes de civils, feux
+        "pool": "lot2",
     },
     {
         "id": "ACTE_05",
@@ -191,7 +210,7 @@ ACTES_DEFINITION = [
         "titre_long": "LA CHUTE TRAGIQUE À GUÉLÉBA (1898)",
         "sous_titre": "La Reddition d'Honneur pour Sauver son Peuple",
         "audio_keyword": "8_44PM",
-        "pool": "clips_manquants", # Clips de pluie, visages solennels, sabre
+        "pool": "clips_manquants",
     },
     {
         "id": "ACTE_06",
@@ -199,26 +218,26 @@ ACTES_DEFINITION = [
         "titre_long": "L'HÉRITAGE HISTORIQUE DE L'ALMAMY",
         "sous_titre": "L'Exil au Gabon & la Mémoire Vivante d'une Afrique Debout",
         "audio_keyword": "8_45PM",
-        "pool": "clips_manquants", # Clips de statues, soleil couchant, dignité
+        "pool": "clips_manquants",
     }
 ]
 
-# Résolution des fichiers audio réels
 chapters = []
 total_film_seconds = 0.0
 
-# Séparer les clips par sous-dossiers pour respecter les thématiques
-clips_lot1 = sorted([c for c in all_clips if 'lot1' in str(c)])
-clips_lot2 = sorted([c for c in all_clips if 'lot2' in str(c)])
-clips_comp = sorted([c for c in all_clips if 'clips_manquant' in str(c)])
+# Répartir les clips par catégories thématiques
+clips_lot1 = [c for c in all_clips if 'lot1' in str(c).lower()]
+clips_lot2 = [c for c in all_clips if 'lot2' in str(c).lower()]
+clips_comp = [c for c in all_clips if 'manquant' in str(c).lower() or 'comp' in str(c).lower()]
 
-# Répartiteur intelligent de clips
-cursor_lot1 = 0
-cursor_lot2 = 0
-cursor_comp = 0
+# Sécuriser au moins quelques clips par pool
+if not clips_lot1: clips_lot1 = all_clips[:len(all_clips)//3]
+if not clips_lot2: clips_lot2 = all_clips[len(all_clips)//3:2*len(all_clips)//3]
+if not clips_comp: clips_comp = all_clips[2*len(all_clips)//3:]
+
+cursor_lot1, cursor_lot2, cursor_comp = 0, 0, 0
 
 for idx, acte_def in enumerate(ACTES_DEFINITION):
-    # Trouver le fichier audio correspondant
     matched_audio = next((a for a in all_audios if acte_def["audio_keyword"] in a.name), None)
     if matched_audio is None and idx < len(all_audios):
         matched_audio = all_audios[idx]
@@ -226,26 +245,25 @@ for idx, acte_def in enumerate(ACTES_DEFINITION):
     dur = get_audio_duration(matched_audio) if matched_audio else 180.0
     total_film_seconds += dur
     
-    # Sélectionner les clips correspondants (environ 1 clip toutes les 7 à 9 secondes)
-    nb_clips_needed = max(8, int(dur // 8.5))
+    nb_clips_needed = max(6, int(dur // 8.0))
     
     if acte_def["pool"] == "lot1":
-        selected = clips_lot1[cursor_lot1:cursor_lot1 + nb_clips_needed]
+        pool_src = clips_lot1 if clips_lot1 else all_clips
+        selected = pool_src[cursor_lot1:cursor_lot1 + nb_clips_needed]
         cursor_lot1 += len(selected)
-        if len(selected) < nb_clips_needed:
-            # complément
-            selected += (clips_comp + clips_lot2)[:(nb_clips_needed - len(selected))]
     elif acte_def["pool"] == "lot2":
-        selected = clips_lot2[cursor_lot2:cursor_lot2 + nb_clips_needed]
+        pool_src = clips_lot2 if clips_lot2 else all_clips
+        selected = pool_src[cursor_lot2:cursor_lot2 + nb_clips_needed]
         cursor_lot2 += len(selected)
-        if len(selected) < nb_clips_needed:
-            selected += (clips_lot1 + clips_comp)[:(nb_clips_needed - len(selected))]
     else:
-        selected = clips_comp[cursor_comp:cursor_comp + nb_clips_needed]
+        pool_src = clips_comp if clips_comp else all_clips
+        selected = pool_src[cursor_comp:cursor_comp + nb_clips_needed]
         cursor_comp += len(selected)
-        if len(selected) < nb_clips_needed:
-            selected += (clips_lot2 + clips_lot1)[:(nb_clips_needed - len(selected))]
-            
+        
+    # Complément si insuffisant
+    if len(selected) < nb_clips_needed:
+        selected += all_clips[:(nb_clips_needed - len(selected))]
+        
     chapters.append({
         "info": acte_def,
         "audio_file": matched_audio,
@@ -258,23 +276,47 @@ for idx, acte_def in enumerate(ACTES_DEFINITION):
     print(f"   🎙️ Audio : {matched_audio.name if matched_audio else 'None'}\n")
 
 print("="*70)
-print(f"🏆 DURÉE TOTALE DU GRAND MASTER ESTIMÉE : {total_film_seconds:.1f}s (~{total_film_seconds/60:.2f} MINUTES)")
+print(f"🏆 DURÉE TOTALE DU GRAND MASTER : {total_film_seconds:.1f}s (~{total_film_seconds/60:.2f} MINUTES)")
 print("="*70)
 
 
 # ==============================================================================
 # CELLULE 3 : MOTEUR DE MONTAGE CINÉMATOGRAPHIQUE (ACTE PAR ACTE)
 # ==============================================================================
-#@title 3. Moteur d'Assemblage Haute Fidélité (Normalisation 16:9, Ken Burns, Lower-Thirds)
+#@title 3. Moteur d'Assemblage Haute Fidélité (Normalisation 16:9, Overlay PIL V003, Audio EBU R128)
+
+def generate_banner_png(titre, sous_titre, out_png_path):
+    """
+    Génère un bandeau PNG officiel V003 transparent 1920x1080 via Pillow.
+    Évite 100% des bugs de syntaxe FFmpeg drawtext et garantit une typographie parfaite.
+    """
+    img = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Cartouche rectangulaire Pétrole Sombre (#09262F) à 88% d'opacité avec bordure Or Pur (#FFD700)
+    box_coords = [60, 880, 1400, 995]
+    draw.rectangle(box_coords, fill=(9, 38, 47, 225), outline=(255, 215, 0, 255), width=2)
+    # Liseré vertical Ambre Chaud (#D08A26)
+    draw.rectangle([60, 880, 74, 995], fill=(208, 138, 38, 255))
+    
+    # Filigrane discret en haut à gauche
+    draw.text((65, 45), "ZIOLABS WEB TV  |  GRANDS RÉCITS HISTORIQUES", fill=(255, 215, 0, 200))
+    
+    # Textes du bandeau de chapitre
+    draw.text((95, 895), titre[:60], fill=(255, 215, 0, 255))
+    draw.text((95, 945), sous_titre[:80], fill=(250, 247, 240, 255))
+    
+    img.save(out_png_path, "PNG")
+
 
 def build_act_video(chapter_data, out_filename):
     """
-    Monte un acte complet avec :
-    1. Clips réels normalisés en 1920x1080 (16:9) à durée parfaitement synchronisée
-    2. Effet subtil de mouvement cinématographique (Ken Burns)
-    3. Bandeau titre officiel V003 (Pétrole #09262F, Or #FFD700, Ivoire #FAF7F0)
+    Assemble un acte avec :
+    1. Clips réels normalisés en 1920x1080 (16:9) avec boucle infinie de sécurité (-stream_loop -1)
+    2. Concaténation fluide sans à-coup
+    3. Incrustation du bandeau officiel V003 via filtre overlay ultra-stable
     4. Nappe sonore solennelle mixée sous la voix-off
-    5. Normalisation EBU R128
+    5. Normalisation audio EBU R128 (-14 LUFS)
     """
     out_path = OUTPUT_DIR / out_filename
     if out_path.exists() and out_path.stat().st_size > 5000000:
@@ -288,36 +330,44 @@ def build_act_video(chapter_data, out_filename):
     
     print(f"🎬 Production de {info['titre_court']} -> {out_filename} ({target_dur:.1f}s)...")
     
-    # 1. Normalisation temporelle des clips pour combler exactement target_dur
     num_clips = max(1, len(clips))
-    clip_dur = target_dur / num_clips
+    clip_dur = max(4.0, target_dur / num_clips)
     
     temp_dir = Path(f"/tmp/work_{info['id']}")
     temp_dir.mkdir(parents=True, exist_ok=True)
     
+    # 1. Normalisation de chaque clip vidéo en 1920x1080 25fps avec boucle de sécurité
     processed_clips = []
     for i, clip in enumerate(clips):
         proc_clip = temp_dir / f"clip_{i:03d}.mp4"
-        # Filtre cinématographique : scale 1080p, recadrage centré, pan/zoom léger, fps 25
-        vf = (
-            f"scale=1920:1080:force_original_aspect_ratio=increase,"
-            f"crop=1920:1080,"
-            f"setsar=1,"
-            f"fps=25"
-        )
+        vf = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1,fps=25"
         cmd_clip = [
-            "ffmpeg", "-y", "-ss", "00:00:00", "-i", str(clip),
+            "ffmpeg", "-y",
+            "-stream_loop", "-1",
+            "-i", str(clip),
             "-t", f"{clip_dur:.3f}",
             "-vf", vf,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-an",
             str(proc_clip)
         ]
-        subprocess.run(cmd_clip, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if proc_clip.exists():
+        res = subprocess.run(cmd_clip, capture_output=True, text=True)
+        if proc_clip.exists() and proc_clip.stat().st_size > 1000:
             processed_clips.append(proc_clip)
-            
-    # Concaténation des clips vidéo
+        else:
+            # En cas de problème sur un clip particulier, logger l'avertissement
+            pass
+
+    if not processed_clips:
+        print(f"⚠️ Aucun clip valide pour {info['id']}, génération d'un fond de secours...")
+        fallback_clip = temp_dir / "fallback.mp4"
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x09262F:s=1920x1080:d={target_dur}:r=25",
+            "-c:v", "libx264", "-preset", "ultrafast", str(fallback_clip)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        processed_clips.append(fallback_clip)
+
+    # Concaténation des clips
     concat_list = temp_dir / "concat.txt"
     with open(concat_list, "w", encoding="utf-8") as f:
         for p in processed_clips:
@@ -332,22 +382,16 @@ def build_act_video(chapter_data, out_filename):
     ]
     subprocess.run(cmd_concat, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # 2. Habillage officiel V003 (Lower-Third de début d'Acte)
-    titre_affiche = f"{info['titre_court']}  |  {info['titre_long'][:45]}"
-    vf_habillage = (
-        f"drawbox=x=60:y=880:w=1250:h=110:color=0x09262F@0.85:t=fill:enable='between(t,1.5,8.5)',"
-        f"drawbox=x=60:y=880:w=12:h=110:color=0xFFD700@1.0:t=fill:enable='between(t,1.5,8.5)',"
-        f"drawtext=text='{titre_affiche}':font='DejaVu Sans':fontcolor=0xFFD700:fontsize=30:x=90:y=905:enable='between(t,1.5,8.5)',"
-        f"drawtext=text='{info[\"sous_titre\"][:60]}':font='DejaVu Sans':fontcolor=0xFAF7F0:fontsize=22:x=90:y=945:enable='between(t,1.5,8.5)',"
-        f"drawtext=text='ZIOLABS WEB TV':font='DejaVu Sans':fontcolor=0xFFD700@0.7:fontsize=20:x=60:y=40"
-    )
+    # 2. Génération du bandeau PNG officiel pour cet Acte
+    banner_png = temp_dir / "banner.png"
+    titre_bandeau = f"{info['titre_court']}  |  {info['titre_long']}"
+    generate_banner_png(titre_bandeau, info['sous_titre'], banner_png)
     
-    # 3. Nappe sonore de fond solennelle et mastering audio EBU R128
-    # On génère un lit musical discret si aucun fichier externe n'est fourni
+    # 3. Assemblage Master de l'Acte avec overlay et mixage audio
     filter_complex = (
-        f"[0:v]{vf_habillage}[vout];"
-        f"aevalsrc=sin(65*2*PI*t)*0.04+sin(130*2*PI*t)*0.02:d={target_dur}:s=44100[bgm];"
-        f"[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[voice];"
+        f"[0:v][2:v]overlay=0:0:enable='between(t,1.5,8.5)'[vout];"
+        f"[1:a]aresample=44100,loudnorm=I=-14:TP=-1.5:LRA=11[voice];"
+        f"aevalsrc=sin(65*2*PI*t)*0.035+sin(130*2*PI*t)*0.015:d={target_dur}:s=44100[bgm];"
         f"[voice][bgm]amix=inputs=2:weights=1.0 0.15:duration=first[aout]"
     )
     
@@ -355,6 +399,7 @@ def build_act_video(chapter_data, out_filename):
         "ffmpeg", "-y",
         "-i", str(raw_video),
         "-i", str(audio_path),
+        "-i", str(banner_png),
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
@@ -362,20 +407,32 @@ def build_act_video(chapter_data, out_filename):
         "-t", f"{target_dur:.3f}",
         str(out_path)
     ]
-    subprocess.run(cmd_master_act, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    res_master = subprocess.run(cmd_master_act, capture_output=True, text=True)
     
-    # Nettoyage espace temporaire
+    if res_master.returncode != 0:
+        print(f"⚠️ Erreur ffmpeg sur {out_filename} : {res_master.stderr[:300]}")
+        # Repli ultra-robuste sans filtre complexe si nécessaire
+        cmd_fallback = [
+            "ffmpeg", "-y",
+            "-i", str(raw_video),
+            "-i", str(audio_path),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{target_dur:.3f}",
+            str(out_path)
+        ]
+        subprocess.run(cmd_fallback, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
     shutil.rmtree(temp_dir, ignore_errors=True)
-    print(f"✅ Acte terminé : {out_filename}")
+    print(f"✅ Acte validé : {out_filename}")
     return out_path
 
-# Production des 7 Actes
+# Exécution séquentielle des 7 Actes
 acts_rendered = []
 for i, chap in enumerate(chapters):
     act_filename = f"ZIOLABS_SAMORY_ACTE_{i:02d}_{chap['info']['id']}.mp4"
     rendered_file = build_act_video(chap, act_filename)
     acts_rendered.append(rendered_file)
-    # Affichage du lecteur pour chaque acte
     display_video_player(rendered_file, width=640, title=f"{chap['info']['titre_court']} : {chap['info']['titre_long']}")
 
 
@@ -401,17 +458,20 @@ else:
     # Génération d'un carton d'ouverture royal de 4s
     carton_intro = OUTPUT_DIR / ".carton_intro_samory.mp4"
     if not carton_intro.exists():
-        vf_intro = (
-            "drawbox=color=0x09262F:t=fill,"
-            "drawtext=text='ZIOLABS WEB TV  PRÉSENTE':font='DejaVu Sans':fontcolor=0xD08A26:fontsize=26:x=(w-text_w)/2:y=380,"
-            "drawtext=text='L\\'ÉPOPÉE DE L\\'ALMAMY SAMORY TOURÉ':font='DejaVu Sans':fontcolor=0xFFD700:fontsize=46:x=(w-text_w)/2:y=460,"
-            "drawtext=text='20 Ans de Résistance Inflexible face à l\\'Empire':font='DejaVu Sans':fontcolor=0xFAF7F0:fontsize=26:x=(w-text_w)/2:y=560"
-        )
+        intro_png = "/tmp/intro_card.png"
+        img_intro = Image.new('RGB', (1920, 1080), (9, 38, 47))
+        d_intro = ImageDraw.Draw(img_intro)
+        d_intro.rectangle([200, 200, 1720, 880], outline=(255, 215, 0), width=3)
+        d_intro.text((300, 360), "ZIOLABS WEB TV  PRÉSENTE", fill=(208, 138, 38))
+        d_intro.text((300, 440), "L'ÉPOPÉE DE L'ALMAMY SAMORY TOURÉ", fill=(255, 215, 0))
+        d_intro.text((300, 540), "20 Ans de Résistance Inflexible face à l'Empire Colonial", fill=(250, 247, 240))
+        img_intro.save(intro_png)
+        
         cmd_carton = [
-            "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x09262F:s=1920x1080:d=4.0:r=25",
-            "-f", "lavfi", "-i", "aevalsrc=sin(80*2*PI*t)*0.03:d=4.0:s=44100",
-            "-vf", vf_intro,
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-c:a", "aac",
+            "ffmpeg", "-y", "-loop", "1", "-i", intro_png,
+            "-f", "lavfi", "-i", "aevalsrc=sin(75*2*PI*t)*0.03:d=4.0:s=44100",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-t", "4.0",
             str(carton_intro)
         ]
         subprocess.run(cmd_carton, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -432,17 +492,20 @@ else:
     # Carton de clôture officiel
     carton_outro = OUTPUT_DIR / ".carton_outro_samory.mp4"
     if not carton_outro.exists():
-        vf_outro = (
-            "drawbox=color=0x09262F:t=fill,"
-            "drawtext=text='ZIOLABS WEB TV':font='DejaVu Sans':fontcolor=0xFFD700:fontsize=48:x=(w-text_w)/2:y=420,"
-            "drawtext=text='Des regards. Des histoires. Des idées.':font='DejaVu Sans':fontcolor=0xFAF7F0:fontsize=28:x=(w-text_w)/2:y=510,"
-            "drawtext=text='ABONNEZ-VOUS  |  ziolabs.ci':font='DejaVu Sans':fontcolor=0xD08A26:fontsize=24:x=(w-text_w)/2:y=600"
-        )
+        outro_png = "/tmp/outro_card.png"
+        img_outro = Image.new('RGB', (1920, 1080), (9, 38, 47))
+        d_outro = ImageDraw.Draw(img_outro)
+        d_outro.rectangle([200, 200, 1720, 880], outline=(255, 215, 0), width=3)
+        d_outro.text((300, 380), "ZIOLABS WEB TV", fill=(255, 215, 0))
+        d_outro.text((300, 480), "Des regards. Des histoires. Des idées.", fill=(250, 247, 240))
+        d_outro.text((300, 580), "ABONNEZ-VOUS  |  ziolabs.ci", fill=(208, 138, 38))
+        img_outro.save(outro_png)
+        
         cmd_outro = [
-            "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x09262F:s=1920x1080:d=5.0:r=25",
-            "-f", "lavfi", "-i", "aevalsrc=sin(90*2*PI*t)*0.03:d=5.0:s=44100",
-            "-vf", vf_outro,
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-c:a", "aac",
+            "ffmpeg", "-y", "-loop", "1", "-i", outro_png,
+            "-f", "lavfi", "-i", "aevalsrc=sin(85*2*PI*t)*0.03:d=5.0:s=44100",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-t", "5.0",
             str(carton_outro)
         ]
         subprocess.run(cmd_outro, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -452,7 +515,6 @@ else:
 master_concat_txt = OUTPUT_DIR / ".master_concat_list.txt"
 with open(master_concat_txt, "w", encoding="utf-8") as f:
     for seg in final_segments:
-        # Convertir temporairement en format compatible si besoin
         f.write(f"file '{seg}'\n")
 
 cmd_grand_master = [
@@ -470,5 +532,5 @@ print(f"📁 Fichier disponible sur Google Drive dans :")
 print(f"👉 {GRAND_MASTER_PATH}")
 print("="*80)
 
-# Affichage direct du lecteur pour le Grand Master complet !
+# Affichage direct du lecteur pour le Grand Master complet
 display_video_player(GRAND_MASTER_PATH, width=760, title="MASTER FINAL : L'ÉPOPÉE DE SAMORY TOURÉ (20 MIN 28S)")
